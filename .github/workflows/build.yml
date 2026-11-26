@@ -46,4 +46,5 @@ jobs:
             Windows: setup.exe 를 받아 실행하세요.
           releaseDraft: false
           prerelease: false
+          assetNamePattern: 'Memo_[version]_[platform]_[arch][ext]'
           args: ${{ matrix.args }}
