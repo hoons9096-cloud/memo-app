@@ -1,0 +1,153 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>메모장</title>
+<style>
+:root{color-scheme:light dark;
+--bg:#ffffff;--ink:#1b2226;--side:#1e272c;--sideink:#e7ecef;--muted:#6b777e;
+--rule:#dfe7ec;--margin:#f2a7a0;--warn:#fff4f2;
+--accent:#ffd84a;--accentink:#1e272c;--hover:rgba(255,255,255,.07);--sel:rgba(255,216,74,.16)}
+@media (prefers-color-scheme:dark){:root{--bg:#15191c;--ink:#e8ecee;--side:#0d1113;--muted:#8d999f;--rule:#242b30;--margin:#7a3b37;--warn:#2a1716}}
+*{box-sizing:border-box;min-width:0}
+html,body{height:100%}
+body{margin:0;background:var(--bg);color:var(--ink);font:16px/1.6 -apple-system,"Apple SD Gothic Neo","Malgun Gothic","맑은 고딕",system-ui,sans-serif;overflow:hidden;-webkit-user-select:none;user-select:none}
+.app{display:grid;grid-template-columns:260px minmax(0,1fr);height:100%}
+aside{background:var(--side);color:var(--sideink);display:flex;flex-direction:column;border-right:4px solid var(--accent)}
+.top{padding:16px 14px 10px;display:flex;align-items:center;gap:8px}
+.top h1{font-size:19px;margin:0;flex:1;letter-spacing:-.01em}
+button{font:inherit;font-size:14px;border:0;border-radius:8px;cursor:pointer;min-height:36px;padding:0 12px}
+button:disabled{opacity:.4;cursor:default}
+button:focus-visible,input:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+.new{background:var(--accent);color:var(--accentink);font-weight:700}
+.search{margin:0 14px 10px;padding:9px 12px;border-radius:8px;border:1px solid #3a464d;background:#141b1f;color:var(--sideink);font:inherit;font-size:15px;user-select:text}
+ul{list-style:none;margin:0;padding:0 8px;overflow-y:auto;flex:1}
+li button{width:100%;text-align:left;background:none;color:inherit;padding:10px;display:block;min-height:52px}
+li button:hover{background:var(--hover)}
+li.on button{background:var(--sel)}
+.t{display:block;font-weight:600;font-size:15px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.d{display:block;font-size:13px;color:#93a1a8}
+.empty{padding:16px;color:#93a1a8;font-size:14px}
+.foot{padding:10px 14px 14px;font-size:12px;color:#93a1a8;display:grid;gap:8px;word-break:break-all}
+.foot button{background:#2b363c;color:var(--sideink)}
+main{display:flex;flex-direction:column;height:100%}
+.bar{display:flex;align-items:center;gap:8px;padding:10px 18px;border-bottom:1px solid var(--rule);font-size:13px;color:var(--muted)}
+.bar .s{flex:1}
+.bar button{background:transparent;color:var(--muted);border:1px solid var(--rule)}
+.bar button.del:hover:not(:disabled){color:#d9463b;border-color:#d9463b}
+.ask{display:none;align-items:center;gap:8px;padding:10px 18px;background:var(--warn);font-size:14px}
+.ask.on{display:flex}.ask span{flex:1}
+.ask .yes{background:#d9463b;color:#fff}.ask .no{background:var(--rule);color:var(--ink)}
+.paper{flex:1;position:relative;overflow:hidden}
+textarea{position:absolute;inset:0;width:100%;height:100%;border:0;resize:none;outline:none;user-select:text;-webkit-user-select:text;
+ background:linear-gradient(90deg,transparent 54px,var(--margin) 54px,var(--margin) 55px,transparent 55px),repeating-linear-gradient(transparent 0 31px,var(--rule) 31px 32px);
+ background-attachment:local;background-position:0 18px;color:var(--ink);
+ font:17px/32px -apple-system,"Apple SD Gothic Neo","Malgun Gothic","맑은 고딕",system-ui,sans-serif;padding:18px 28px 40px 74px}
+textarea::placeholder{color:var(--muted)}
+</style>
+</head>
+<body>
+<div class="app">
+ <aside>
+  <div class="top"><h1>메모장</h1><button class="new" id="new" title="새 메모 (Ctrl/Cmd+N)">＋ 새 메모</button></div>
+  <input class="search" id="q" type="search" placeholder="메모 검색" aria-label="메모 검색">
+  <ul id="list"></ul>
+  <div class="foot">
+   <span id="where">저장 위치 확인 중…</span>
+   <button id="folder">저장 폴더 열기</button>
+  </div>
+ </aside>
+ <main>
+  <div class="bar"><span class="s" id="status">준비됨</span><button class="del" id="del">삭제</button></div>
+  <div class="ask" id="ask"><span id="askt"></span><button class="yes" id="yes">휴지통으로</button><button class="no" id="no">취소</button></div>
+  <div class="paper"><textarea id="ed" placeholder="여기에 쓰세요. 첫 줄이 제목이 됩니다." spellcheck="false"></textarea></div>
+ </main>
+</div>
+<script>
+{
+const $=id=>document.getElementById(id);
+const esc=s=>String(s).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+const newId=()=>Date.now().toString(36)+Math.random().toString(36).slice(2,6);
+const titleOf=t=>(t.split('\n').find(l=>l.trim())||'제목 없음').trim().slice(0,80);
+const fmt=ms=>{const d=new Date(ms),n=new Date();return d.toDateString()===n.toDateString()?d.toLocaleTimeString('ko-KR',{hour:'2-digit',minute:'2-digit'}):d.toLocaleDateString('ko-KR',{month:'short',day:'numeric'})};
+
+// Tauri 앱에서는 Rust 쪽 명령으로 .txt 파일을 읽고 쓴다. 브라우저에서 열면 localStorage로 동작.
+const invoke=window.__TAURI__?.core?.invoke;
+const store=invoke?{
+ list:()=>invoke('list_notes'),
+ save:n=>invoke('save_note',{id:n.id,text:n.text}),
+ remove:n=>invoke('delete_note',{id:n.id}),
+ where:()=>invoke('notes_dir'),
+ open:()=>invoke('open_folder')
+}:{
+ list:async()=>{try{return JSON.parse(localStorage.getItem('memo.notes')||'[]')}catch{return []}},
+ save:async()=>{try{localStorage.setItem('memo.notes',JSON.stringify(notes))}catch{}},
+ remove:async()=>{try{localStorage.setItem('memo.notes',JSON.stringify(notes))}catch{}},
+ where:async()=>'브라우저 미리보기 (파일 저장 안 됨)',
+ open:async()=>{}
+};
+
+let notes=[],cur=null,timer=null;
+const status=t=>{$('status').textContent=t};
+const errText=e=>typeof e==='string'?e:(e?.message||String(e));
+
+function render(){
+ const q=$('q').value.trim().toLowerCase();
+ const shown=notes.filter(n=>!q||n.text.toLowerCase().includes(q)).sort((a,b)=>b.mtime-a.mtime);
+ $('list').innerHTML=shown.length?shown.map(n=>`<li class="${cur&&n.id===cur.id?'on':''}"><button data-id="${esc(n.id)}"><span class="t">${esc(titleOf(n.text))}</span><span class="d">${esc(fmt(n.mtime))}</span></button></li>`).join(''):`<li class="empty">${q?'검색 결과가 없습니다':'메모가 없습니다'}</li>`;
+}
+function open(n){cur=n;$('ed').value=n?n.text:'';$('ed').disabled=!n;$('del').disabled=!n;$('ask').classList.remove('on');render()}
+async function flush(){
+ if(!timer)return;clearTimeout(timer);timer=null;
+ try{await store.save(cur);status(`저장됨 · ${fmt(cur.mtime)}`)}catch(e){status('저장 실패: '+errText(e))}
+}
+async function create(){
+ await flush();
+ const n={id:newId(),text:'',mtime:Date.now()};
+ notes.push(n);open(n);$('ed').focus();
+ try{await store.save(n);status('새 메모')}catch(e){status('저장 실패: '+errText(e))}
+}
+function onType(){
+ if(!cur)return;
+ cur.text=$('ed').value;cur.mtime=Date.now();status('입력 중…');
+ clearTimeout(timer);
+ timer=setTimeout(async()=>{timer=null;
+  try{await store.save(cur);status(`저장됨 · ${fmt(cur.mtime)}`)}catch(e){status('저장 실패: '+errText(e))}
+  render();
+ },400);
+}
+async function remove(){
+ if(!cur)return;
+ clearTimeout(timer);timer=null;
+ const n=cur;notes=notes.filter(x=>x!==n);
+ try{await store.remove(n);status('휴지통으로 옮겼습니다')}
+ catch(e){notes.push(n);status('삭제 실패: '+errText(e))}
+ open(notes.sort((a,b)=>b.mtime-a.mtime)[0]||null);
+}
+
+$('new').onclick=create;
+$('ed').addEventListener('input',onType);
+$('q').addEventListener('input',render);
+$('list').addEventListener('click',async e=>{const b=e.target.closest('button[data-id]');if(!b)return;await flush();open(notes.find(n=>n.id===b.dataset.id))});
+$('del').onclick=()=>{if(!cur)return;$('askt').textContent=`"${titleOf(cur.text)}" 메모를 휴지통으로 옮길까요?`;$('ask').classList.add('on')};
+$('no').onclick=()=>$('ask').classList.remove('on');
+$('yes').onclick=remove;
+$('folder').onclick=()=>store.open().catch(e=>status(errText(e)));
+document.addEventListener('keydown',e=>{if((e.ctrlKey||e.metaKey)&&e.key.toLowerCase()==='n'){e.preventDefault();create()}});
+window.addEventListener('blur',flush);
+document.addEventListener('contextmenu',e=>{if(!e.target.closest('textarea,input'))e.preventDefault()});
+
+(async()=>{
+ try{$('where').textContent=await store.where()}catch(e){$('where').textContent=errText(e)}
+ try{notes=await store.list()}catch(e){status('불러오기 실패: '+errText(e))}
+ if(!notes.length){
+  const w={id:newId(),mtime:Date.now(),text:'메모장에 오신 걸 환영합니다\n\n왼쪽 ＋ 새 메모(Ctrl/Cmd+N)로 메모를 만들고, 쓰는 즉시 .txt 파일로 자동 저장됩니다.\n첫 줄이 목록의 제목이 됩니다.'};
+  notes=[w];store.save(w).catch(()=>{});
+ }
+ open(notes.sort((a,b)=>b.mtime-a.mtime)[0]);
+})();
+}
+</script>
+</body>
+</html>
